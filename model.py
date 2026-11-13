@@ -60,11 +60,42 @@ class CausalMultiHeadAttention(nn.Module):
 
         return out
 
-    
 
+class FeedForward(nn.Module):
+    def __init__(self, n_embd, dropout=0.1):
+        super().__init__()
+
+        self.feed = nn.Sequential(nn.Linear(n_embd, n_embd*4), 
+                                   nn.GELU(approximate='tanh'), 
+                                   nn.Linear(n_embd*4, n_embd), 
+                                   nn.Dropout(p=dropout))
+        
+    def forward(self, x):
+
+        out = self.feed(x)
+        return out
+
+class TransformerBlock(nn.Module):
+    def __init__(self, n_embd, n_heads, dropout, len_context):
+        super().__init__()
+
+        self.attention_block = CausalMultiHeadAttention(n_embd=n_embd, 
+                                                        n_head=n_heads, 
+                                                        len_context=len_context)
+        
+        self.ffn = FeedForward(n_embd=n_embd, dropout=dropout)
+
+        self.layer_norm1 = nn.LayerNorm(n_embd, 1e-5)
+        self.layer_norm2 = nn.LayerNorm(n_embd, 1e-5)
+
+    def forward(self, x):
+        x = x + self.attention_block(self.layer_norm1(x))
+        x = x + self.ffn(self.layer_norm2(x))
+
+        return x
 
 
 model = CausalMultiHeadAttention(n_embd=64, n_head=4, len_context=128)
 x = torch.randn(2, 10, 64)
 y = model(x)
-print(y.shape)  # должно быть torch.Size([2, 10, 64])
+print(y.shape)
