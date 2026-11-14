@@ -95,10 +95,10 @@ class TransformerBlock(nn.Module):
         return x
     
 class MiniGPT(nn.Module):
-    def __init__(self, len_context, num_heads, vocab_size, head_size, dropout, n_embed, num_blocks):
+    def __init__(self, len_context, num_heads, vocab_size, dropout, n_embed, num_blocks):
         super().__init__()
         self.len_context = len_context
-        self.head_size = head_size
+        self.head_size = n_embed//num_heads
 
         self.token_embed = nn.Embedding(vocab_size, n_embed)
         self.position_embed = nn.Embedding(len_context, n_embed)
@@ -114,17 +114,10 @@ class MiniGPT(nn.Module):
 
     def forward(self, x, targets=None):
 
-        if targets is None:
-            x_input = x[:, :-1]
-            targets = x[:, 1:]
-            T = T - 1
-        else:
-            x_input = x
-
         B, T = x.shape
 
-        x_embd = self.token_embed(x_input),
-        x_pos =  self.position_embed(torch.arange(T, device=x_input.device))
+        x_embd = self.token_embed(x)
+        x_pos =  self.position_embed(torch.arange(T, device=x.device))
         x = x_embd + x_pos
 
         x = self.cluster(x)
