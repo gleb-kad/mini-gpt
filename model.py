@@ -93,6 +93,57 @@ class TransformerBlock(nn.Module):
         x = x + self.ffn(self.layer_norm2(x))
 
         return x
+    
+class MiniGPT(nn.Module):
+    def __init__(self, len_context, num_heads, vocab_size, head_size, dropout, n_embed, num_blocks):
+        super().__init__()
+        self.len_context = len_context
+        self.head_size = head_size
+
+        self.token_embed = nn.Embedding(vocab_size, n_embed)
+        self.position_embed = nn.Embedding(len_context, n_embed)
+
+        self.cluster = nn.Sequential(*[TransformerBlock(n_embd=n_embed, 
+                                                  n_heads=num_heads, 
+                                                  dropout=dropout, 
+                                                  len_context=len_context) 
+                                                  for _ in range(num_blocks)])
+
+        self.layernorm = nn.LayerNorm(n_embed, 1e-5)
+        self.lm_head = nn.Linear(n_embed, vocab_size, bias=False)
+
+    def forward(self, x, targets=None):
+
+        if targets is None:
+            x_input = x[:, :-1]
+            targets = x[:, 1:]
+            T = T - 1
+        else:
+            x_input = x
+
+        B, T = x.shape
+
+        x_embd = self.token_embed(x_input),
+        x_pos =  self.position_embed(torch.arange(T, device=x_input.device))
+        x = x_embd + x_pos
+
+        x = self.cluster(x)
+        x = self.layernorm(x)
+
+        logits = self.lm_head(x)
+
+        if targets is not None:
+            B, T, C = logits.shape
+            logits_flat = logits.view(B*T, C)
+            targets_flat = targets.view(B*T)
+            loss = F.cross_entropy(logits_flat, targets_flat)
+        else:
+            loss = None
+        return logits, loss
+
+    
+
+
 
 
 model = CausalMultiHeadAttention(n_embd=64, n_head=4, len_context=128)
