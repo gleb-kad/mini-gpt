@@ -3,13 +3,22 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class CausalMultiHeadAttention(nn.Module):
+    """
+    Multi Head Attention block
 
-    def __init__(self, n_embd, len_context, n_head):
+    parameters:
+    x - input Tensor of B, T, C dimensions where
+        B - batch_size,
+        T - len_context - maximum number of tokens in input prompt
+        C - n_embd, inner size of data representation
+    n_head - numbers of attention heads
+
+    output:
+    out - matrix B, T, C - logits of attention block
+    """
+
+    def __init__(self, n_embd: int=64, len_context: int=128, n_head: int=4):
         super().__init__()
-
-        # B - batch size
-        # T - context length
-        # C - embedding size
 
         assert n_embd % n_head == 0
         self.n_heads = n_head
@@ -26,10 +35,9 @@ class CausalMultiHeadAttention(nn.Module):
         self.dropout_softmax = nn.Dropout(p=0.1)
         self.dropout_linear = nn.Dropout(p=0.1)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         B,T,C = x.shape
-        # x (B, T, C)
 
         q = self.query(x)
         k = self.key(x)
@@ -62,7 +70,21 @@ class CausalMultiHeadAttention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, n_embd, dropout=0.1):
+    """
+    Fully-connected network that adds complexity and non-linearity to attention head
+
+    parameters:
+    x - input Tensor of B, T, C dimensions where:
+        B - batch_size,
+        T - len_context - maximum number of tokens in input prompt
+        C - n_embd, inner size of data representation. The output of attention block
+    n_embd - inner size of data representation
+    dropout - percentage of neurons to be shutted down to generalize the model
+
+    output:
+    out - tensor of B, T, C dimension
+    """
+    def __init__(self, n_embd: int=64, dropout: int=0.1):
         super().__init__()
 
         self.feed = nn.Sequential(nn.Linear(n_embd, n_embd*4), 
@@ -70,13 +92,32 @@ class FeedForward(nn.Module):
                                    nn.Linear(n_embd*4, n_embd), 
                                    nn.Dropout(p=dropout))
         
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
 
         out = self.feed(x)
         return out
 
 class TransformerBlock(nn.Module):
-    def __init__(self, n_embd, n_heads, dropout, len_context):
+    """
+    Transformer proccesing unit. Consists of MultiHead Attention block and linear MLP network.
+
+    parameters:
+    x - input Tensor of B, T, C dimensions where:
+        B - batch_size,
+        T - len_context - maximum number of tokens in input prompt
+        C - n_embd, inner size of data representation
+    n_head - numbers of attention heads
+    dropout - percentage of neurons to be shutted down to generalize the model
+
+    output:
+    out - tensor of B, T, C dimension
+    """
+    def __init__(self, 
+                n_embd: int=64,
+                n_heads: int=4, 
+                dropout: int=0.1, 
+                len_context: int=128):
+        
         super().__init__()
 
         self.attention_block = CausalMultiHeadAttention(n_embd=n_embd, 
@@ -88,31 +129,59 @@ class TransformerBlock(nn.Module):
         self.layer_norm1 = nn.LayerNorm(n_embd, 1e-5)
         self.layer_norm2 = nn.LayerNorm(n_embd, 1e-5)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attention_block(self.layer_norm1(x))
         x = x + self.ffn(self.layer_norm2(x))
 
         return x
     
 class MiniGPT(nn.Module):
-    def __init__(self, len_context, num_heads, vocab_size, dropout, n_embed, num_blocks):
+    """
+    Neural Network consists of n-Transformer blocks, 
+    normalized with LayerNormalization and put through linear layer 
+    to mix and aggregate all n-Transformer blocks outputs. 
+    Uses CrossEntropyLoss function
+
+    parameters:
+    x - input Tensor of B, T, C dimensions where:
+        B - batch_size,
+        T - len_context - maximum number of tokens in input prompt
+        C - n_embd, inner size of data representation
+    num_heads - numbers of attention heads
+    vocab_size - number of seen tokens in Embedding Table
+    dropout - percentage of neurons to be shutted down to generalize the model
+    num_blocks - number of Transformer blocks in architecture
+
+    output:
+    logits - probabilities of Transformer that need to be transformed from n_embed back to vocab_size
+    loss - CrossEntropyLoss value used in training loop for reduction
+    """
+    def __init__(self, 
+                 len_context: int=128, 
+                 num_heads: int=4, 
+                 vocab_size: int=128, 
+                 dropout: int=0.1, 
+                 n_embd: int=64, 
+                 num_blocks: int=6):
+        
         super().__init__()
         self.len_context = len_context
-        self.head_size = n_embed//num_heads
+        self.head_size = n_embd//num_heads
 
-        self.token_embed = nn.Embedding(vocab_size, n_embed)
-        self.position_embed = nn.Embedding(len_context, n_embed)
+        self.token_embed = nn.Embedding(vocab_size, n_embd)
+        self.position_embed = nn.Embedding(len_context, n_embd)
 
-        self.cluster = nn.Sequential(*[TransformerBlock(n_embd=n_embed, 
+        self.cluster = nn.Sequential(*[TransformerBlock(n_embd=n_embd, 
                                                   n_heads=num_heads, 
                                                   dropout=dropout, 
                                                   len_context=len_context) 
                                                   for _ in range(num_blocks)])
 
-        self.layernorm = nn.LayerNorm(n_embed, 1e-5)
-        self.lm_head = nn.Linear(n_embed, vocab_size, bias=False)
+        self.layernorm = nn.LayerNorm(n_embd, 1e-5)
+        self.lm_head = nn.Linear(n_embd, vocab_size, bias=False)
 
-    def forward(self, x, targets=None):
+    def forward(self, x: torch.Tensor, 
+                targets: torch.Tensor | None=None) -> torch.Tuple[torch.Tensor, torch.Tensor | None]:
 
         B, T = x.shape
 
@@ -133,13 +202,3 @@ class MiniGPT(nn.Module):
         else:
             loss = None
         return logits, loss
-
-    
-
-
-
-
-model = CausalMultiHeadAttention(n_embd=64, n_head=4, len_context=128)
-x = torch.randn(2, 10, 64)
-y = model(x)
-print(y.shape)
